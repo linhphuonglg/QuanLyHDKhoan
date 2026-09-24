@@ -1,0 +1,6 @@
+{
+  "name": "Quản lý Hợp đồng Giao khoán & Ngân sách Lao động",
+  "description": "Hệ thống chuyên gia HR & Pháp luật quản lý hợp đồng giao khoán, tự động sinh cam kết an toàn, nghiệm thu xác nhận sản phẩm và theo dõi ngân sách chi trả cho từng người lao động.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
