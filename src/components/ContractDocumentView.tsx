@@ -16,9 +16,12 @@ import {
   Layers,
   Sliders,
   AlignJustify,
+  AlignLeft,
   Bold,
   Italic,
-  Underline
+  Underline,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 import { Contract, WorkerContractor, AcceptanceReport } from '../types';
 import { 
@@ -32,17 +35,21 @@ import {
   getAllDocumentPages,
   DocumentPage
 } from '../services/exportDoc';
-import { UserRole } from '../types';
+import { printDocumentHtml } from '../services/printService';
+import { UserRole, DocumentFormattingOptions } from '../types';
 import { getUserRoleProfile } from '../services/authRoles';
+import { X } from 'lucide-react';
 
 interface ContractDocumentViewProps {
   contract: Contract;
   worker: WorkerContractor;
   acceptances: AcceptanceReport[];
   onBack: () => void;
-  onEdit: () => void;
+  onEdit: (initialTab?: 'basic' | 'clauses' | 'safety' | 'preview', focusClause?: number) => void;
   onCheckLegal: () => void;
   currentRole?: UserRole;
+  onUpdateContract?: (updated: Contract) => void;
+  onDeleteContract?: (contractId: string) => void;
 }
 
 export const ContractDocumentView: React.FC<ContractDocumentViewProps> = ({
@@ -53,14 +60,18 @@ export const ContractDocumentView: React.FC<ContractDocumentViewProps> = ({
   onEdit,
   onCheckLegal,
   currentRole = 'admin',
+  onUpdateContract,
+  onDeleteContract,
 }) => {
   const roleProfile = getUserRoleProfile(currentRole);
   const canEdit = roleProfile.canEditContractContent;
+  const canDelete = roleProfile.canDeleteContract;
 
   const [docTab, setDocTab] = useState<'contract' | 'safety' | 'acceptance' | 'all'>('contract');
   const [selectedReportId, setSelectedReportId] = useState<string>(
     acceptances.length > 0 ? acceptances[0].id : ''
   );
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState<boolean>(false);
   
   // Word Online UI settings
   const [zoomLevel, setZoomLevel] = useState<number>(100);
@@ -69,11 +80,69 @@ export const ContractDocumentView: React.FC<ContractDocumentViewProps> = ({
   const [showPageNumbers, setShowPageNumbers] = useState<boolean>(true);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [activePageIndex, setActivePageIndex] = useState<number>(0);
+  const [showGuideBanner, setShowGuideBanner] = useState<boolean>(true);
+
+  // Live Formatting & Alignment State (synced with contract)
+  const fmt = contract.customContent?.formatting;
+  const [fontSize, setFontSize] = useState<number>(fmt?.fontSize || 13);
+  const [lineHeight, setLineHeight] = useState<number>(fmt?.lineHeight || 1.45);
+  const [paragraphIndent, setParagraphIndent] = useState<number>(
+    fmt?.paragraphIndent !== undefined ? fmt.paragraphIndent : 1.27
+  );
+  const [textAlign, setTextAlign] = useState<'justify' | 'left'>(fmt?.textAlign || 'justify');
+  // showRunningHeader defaults to false: Page 1 NEVER shows running header (removes the red highlighted part!)
+  const [showRunningHeader, setShowRunningHeader] = useState<boolean>(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const selectedReport = acceptances.find(a => a.id === selectedReportId) || acceptances[0];
+
+  const updateFormatting = (newFmt: Partial<DocumentFormattingOptions>) => {
+    if (!canEdit) return;
+    const updated: DocumentFormattingOptions = {
+      fontSize: newFmt.fontSize !== undefined ? newFmt.fontSize : fontSize,
+      lineHeight: newFmt.lineHeight !== undefined ? newFmt.lineHeight : lineHeight,
+      paragraphIndent: newFmt.paragraphIndent !== undefined ? newFmt.paragraphIndent : paragraphIndent,
+      textAlign: newFmt.textAlign !== undefined ? newFmt.textAlign : textAlign,
+      showPage1Header: false,
+      showPageNumbers,
+    };
+    if (newFmt.fontSize !== undefined) setFontSize(newFmt.fontSize);
+    if (newFmt.lineHeight !== undefined) setLineHeight(newFmt.lineHeight);
+    if (newFmt.paragraphIndent !== undefined) setParagraphIndent(newFmt.paragraphIndent);
+    if (newFmt.textAlign !== undefined) setTextAlign(newFmt.textAlign);
+
+    if (onUpdateContract) {
+      onUpdateContract({
+        ...contract,
+        customContent: {
+          ...contract.customContent,
+          formatting: updated,
+          lastEditedAt: new Date().toISOString(),
+          lastEditedBy: roleProfile.name,
+        }
+      });
+    }
+  };
+
+  const handleDocumentClick = (e: React.MouseEvent) => {
+    if (!canEdit) return;
+    const target = e.target as HTMLElement;
+    const clauseEl = target.closest('[data-clause]');
+    if (clauseEl) {
+      const clauseNum = Number(clauseEl.getAttribute('data-clause'));
+      if (clauseNum >= 1 && clauseNum <= 5) {
+        onEdit('clauses', clauseNum);
+        return;
+      }
+    }
+    const safetyEl = target.closest('.safety-wysiwyg-content, [data-safety-page]');
+    if (safetyEl || docTab === 'safety') {
+      onEdit('safety');
+      return;
+    }
+  };
 
   // Resolve pages based on current selected document tab
   let currentPages: DocumentPage[] = [];
@@ -117,7 +186,32 @@ export const ContractDocumentView: React.FC<ContractDocumentViewProps> = ({
   };
 
   const handlePrint = () => {
-    window.print();
+    let htmlContent = '';
+    let docTitle = '';
+
+    if (docTab === 'contract') {
+      htmlContent = generateContractHtmlContent(contract, worker);
+      docTitle = `Hop_Dong_${contract.contractNumber.replace(/\//g, '_')}`;
+    } else if (docTab === 'safety') {
+      htmlContent = generateSafetyCommitmentHtml(contract, worker);
+      docTitle = `Cam_Ket_An_Toan_${worker.fullName.replace(/\s+/g, '_')}`;
+    } else if (docTab === 'acceptance' && selectedReport) {
+      htmlContent = generateAcceptanceHtml(selectedReport, contract, worker);
+      docTitle = `Bien_Ban_Nghiem_Thu_${selectedReport.reportNumber.replace(/\//g, '_')}`;
+    } else {
+      htmlContent = `
+        ${generateContractHtmlContent(contract, worker)}
+        <div style="page-break-before: always; break-before: page;"></div>
+        ${generateSafetyCommitmentHtml(contract, worker)}
+        ${selectedReport ? `
+          <div style="page-break-before: always; break-before: page;"></div>
+          ${generateAcceptanceHtml(selectedReport, contract, worker)}
+        ` : ''}
+      `;
+      docTitle = `Ho_So_Tron_Goi_${contract.contractNumber.replace(/\//g, '_')}`;
+    }
+
+    printDocumentHtml(htmlContent, docTitle);
   };
 
   const handleExportWord = () => {
@@ -218,18 +312,33 @@ export const ContractDocumentView: React.FC<ContractDocumentViewProps> = ({
             <span className="hidden md:inline">Soát Lỗi Pháp Lý</span>
           </button>
 
-          <button
-            onClick={onEdit}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer border ${
-              canEdit
-                ? 'text-white/90 bg-white/10 hover:bg-white/20 border-white/20'
-                : 'text-amber-200 bg-amber-900/30 hover:bg-amber-900/50 border-amber-400/40'
-            }`}
-            title={canEdit ? 'Chỉnh sửa nội dung & điều khoản hợp đồng (Admin)' : 'Xem chi tiết các điều khoản hợp đồng (Trạm chỉ xem)'}
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">{canEdit ? 'Sửa Nội Dung HĐ' : 'Xem Nội Dung (Trạm)'}</span>
-          </button>
+          {docTab === 'safety' ? (
+            <button
+              onClick={() => onEdit('safety')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md transition-colors cursor-pointer border shadow-xs ${
+                canEdit
+                  ? 'text-white bg-emerald-600 hover:bg-emerald-500 border-emerald-400 ring-2 ring-emerald-300/40'
+                  : 'text-amber-200 bg-amber-900/30 hover:bg-amber-900/50 border-amber-400/40'
+              }`}
+              title={canEdit ? 'Chỉnh sửa toàn bộ nội dung Bản Cam Kết An Toàn bằng công cụ WYSIWYG' : 'Xem nội dung Bản Cam Kết'}
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-200" />
+              <span>{canEdit ? 'Sửa Bản Cam Kết (WYSIWYG)' : 'Xem Bản Cam Kết'}</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => onEdit('clauses')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-md transition-colors cursor-pointer border shadow-xs ${
+                canEdit
+                  ? 'text-white bg-blue-600 hover:bg-blue-500 border-blue-400 ring-2 ring-blue-300/40'
+                  : 'text-amber-200 bg-amber-900/30 hover:bg-amber-900/50 border-amber-400/40'
+              }`}
+              title={canEdit ? 'Chỉnh sửa toàn bộ nội dung hợp đồng từ Điều 1 đến hết trong 1 khung duy nhất' : 'Xem toàn bộ nội dung điều khoản hợp đồng'}
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>{canEdit ? 'Sửa Toàn Bộ Hợp Đồng (Điều 1 đến hết)' : 'Xem Điều Khoản (Trạm)'}</span>
+            </button>
+          )}
 
           <button
             onClick={handleExportWord}
@@ -248,6 +357,17 @@ export const ContractDocumentView: React.FC<ContractDocumentViewProps> = ({
             <Printer className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">In / Xuất PDF</span>
           </button>
+
+          {canDelete && (
+            <button
+              onClick={() => setIsDeleteModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-red-200 bg-red-950/40 hover:bg-red-900/60 border border-red-400/40 rounded-md transition-colors cursor-pointer"
+              title="Xóa hợp đồng này khỏi hệ thống (Quyền Admin)"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-300" />
+              <span className="hidden md:inline">Xóa HĐ</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -327,28 +447,103 @@ export const ContractDocumentView: React.FC<ContractDocumentViewProps> = ({
         {/* Left: Typography & Paragraph format specs */}
         <div className="flex items-center gap-2 divide-x divide-slate-200">
           <div className="flex items-center gap-1.5">
-            <span className="px-2 py-0.5 bg-slate-100 rounded border border-slate-200 font-serif font-bold text-slate-900">
+            <span className="px-2 py-0.5 bg-slate-100 rounded border border-slate-200 font-serif font-bold text-slate-900" title="Phông chữ quy chuẩn văn bản">
               Times New Roman
             </span>
-            <span className="px-1.5 py-0.5 bg-slate-100 rounded border border-slate-200 font-mono text-[11px] text-slate-700">
-              13 pt
-            </span>
+            
+            {/* Interactive Font Size Selector */}
+            <select
+              value={fontSize}
+              onChange={(e) => updateFormatting({ fontSize: Number(e.target.value) })}
+              className="px-1.5 py-0.5 bg-slate-50 hover:bg-slate-100 rounded border border-slate-200 font-mono text-[11px] font-bold text-slate-800 cursor-pointer focus:ring-1 focus:ring-blue-600"
+              title="Cỡ chữ văn bản (Chuẩn NĐ 30 là 13pt)"
+            >
+              <option value={12}>12 pt</option>
+              <option value={13}>13 pt (Chuẩn)</option>
+              <option value={14}>14 pt</option>
+            </select>
           </div>
 
+          {/* Interactive Alignment & Formatting */}
           <div className="flex items-center gap-1 pl-2 text-slate-600">
-            <span className="p-1 rounded bg-slate-100 text-slate-900 font-bold" title="In đậm (Bold)"><Bold className="w-3 h-3" /></span>
-            <span className="p-1 rounded bg-slate-100 text-slate-900 italic" title="In nghiêng (Italic)"><Italic className="w-3 h-3" /></span>
-            <span className="p-1 rounded bg-slate-100 text-slate-900 underline" title="Gạch chân (Underline)"><Underline className="w-3 h-3" /></span>
-            <span className="p-1 rounded bg-blue-50 text-blue-700" title="Căn đều hai bên (Justify)"><AlignJustify className="w-3 h-3" /></span>
+            <button
+              type="button"
+              onClick={() => updateFormatting({ textAlign: 'justify' })}
+              className={`p-1 rounded cursor-pointer transition-colors ${
+                textAlign === 'justify' ? 'bg-blue-100 text-blue-800 ring-1 ring-blue-400 font-bold' : 'hover:bg-slate-100 text-slate-600'
+              }`}
+              title="Căn đều hai bên (Justify - chuẩn Nghị định 30)"
+            >
+              <AlignJustify className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => updateFormatting({ textAlign: 'left' })}
+              className={`p-1 rounded cursor-pointer transition-colors ${
+                textAlign === 'left' ? 'bg-blue-100 text-blue-800 ring-1 ring-blue-400 font-bold' : 'hover:bg-slate-100 text-slate-600'
+              }`}
+              title="Căn lề trái"
+            >
+              <AlignLeft className="w-3.5 h-3.5" />
+            </button>
+
+            {/* Line Spacing Selector */}
+            <select
+              value={lineHeight}
+              onChange={(e) => updateFormatting({ lineHeight: Number(e.target.value) })}
+              className="ml-1 px-1.5 py-0.5 bg-slate-50 hover:bg-slate-100 rounded border border-slate-200 text-[11px] font-medium text-slate-700 cursor-pointer focus:ring-1 focus:ring-blue-600"
+              title="Khoảng cách dãn dòng"
+            >
+              <option value={1.2}>Dãn 1.2x</option>
+              <option value={1.35}>Dãn 1.35x (Chuẩn)</option>
+              <option value={1.45}>Dãn 1.45x</option>
+              <option value={1.5}>Dãn 1.5x</option>
+            </select>
+
+            {/* Indent Selector */}
+            <select
+              value={paragraphIndent}
+              onChange={(e) => updateFormatting({ paragraphIndent: Number(e.target.value) })}
+              className="ml-1 px-1.5 py-0.5 bg-slate-50 hover:bg-slate-100 rounded border border-slate-200 text-[11px] font-medium text-slate-700 cursor-pointer focus:ring-1 focus:ring-blue-600"
+              title="Thụt đầu dòng đoạn văn bản"
+            >
+              <option value={1.27}>Thụt lề 1.27cm (Chuẩn NĐ 30)</option>
+              <option value={1.0}>Thụt lề 1.0cm</option>
+              <option value={0}>Không thụt lề</option>
+            </select>
+          </div>
+
+          {/* Quick Edit Clauses & Safety Commitment Button right on Ribbon */}
+          <div className="pl-2">
+            {docTab === 'safety' ? (
+              <button
+                onClick={() => onEdit('safety')}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-md transition-colors cursor-pointer shadow-2xs"
+                title="Mở bảng chỉnh sửa chi tiết nội dung Bản cam kết an toàn (WYSIWYG)"
+              >
+                <Edit3 className="w-3 h-3 text-emerald-600" />
+                <span>Sửa Bản Cam Kết An Toàn (WYSIWYG)</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => onEdit('clauses')}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md transition-colors cursor-pointer shadow-2xs"
+                title="Mở bảng chỉnh sửa toàn bộ nội dung từ Điều 1 đến hết hợp đồng trong 1 khung duy nhất"
+              >
+                <Edit3 className="w-3 h-3 text-blue-600" />
+                <span>Sửa toàn bộ nội dung (Điều 1 đến hết)</span>
+              </button>
+            )}
           </div>
 
           {/* Page Setup Indicator (Matching Image 1: Page Setup) */}
-          <div className="hidden lg:flex items-center gap-1.5 pl-2 text-[11px] font-mono">
-            <span className="text-slate-400 font-sans">Định dạng A4:</span>
-            <span className="bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200 text-slate-700">T: <strong>2cm</strong></span>
-            <span className="bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200 text-slate-700">B: <strong>2cm</strong></span>
+          <div className="hidden xl:flex items-center gap-1.5 pl-2 text-[11px] font-mono">
+            <span className="text-slate-400 font-sans">Lề A4:</span>
+            <span className="bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200 text-slate-700">T: 2cm</span>
+            <span className="bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200 text-slate-700">B: 2cm</span>
             <span className="bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200 text-blue-800 font-bold" title="Lề trái 3cm đóng gáy hồ sơ">L: 3cm</span>
-            <span className="bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200 text-slate-700">R: <strong>2cm</strong></span>
+            <span className="bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200 text-slate-700">R: 2cm</span>
           </div>
         </div>
 
@@ -494,6 +689,44 @@ export const ContractDocumentView: React.FC<ContractDocumentViewProps> = ({
           ref={containerRef}
           className="flex-1 overflow-auto bg-[#cbd5e1]/70 p-4 md:p-8 flex flex-col items-center"
         >
+          {/* USER INSTRUCTION GUIDE BANNER (Directly answers user's request) */}
+          {showGuideBanner && (
+            <div 
+              className="print:hidden mb-4 p-3.5 bg-gradient-to-r from-blue-50 via-sky-50 to-indigo-50 border border-blue-200 rounded-xl flex items-start justify-between gap-3 shadow-xs select-none transition-all"
+              style={{
+                width: `${210 * (zoomLevel / 100)}mm`,
+                maxWidth: '100%',
+              }}
+            >
+              <div className="flex items-start gap-2.5">
+                <div className="p-1.5 bg-[#0f5499] text-white rounded-lg shrink-0 mt-0.5 shadow-2xs">
+                  <Sliders className="w-4 h-4" />
+                </div>
+                <div className="text-xs text-slate-800 leading-relaxed">
+                  <div className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <span>Hướng dẫn: Chỉnh sửa toàn bộ nội dung Hợp đồng (Từ Điều 1 đến hết) & Canh lề</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      Đã bỏ phần tô đỏ đầu trang 1
+                    </span>
+                  </div>
+                  <p className="text-slate-600 mt-1">
+                    • <strong>Chỉnh sửa nội dung ở đâu?</strong> Bấm nút <strong>"Sửa Toàn Bộ Hợp Đồng"</strong> hoặc nhấp chuột trực tiếp vào nội dung hợp đồng bên dưới để mở khung soạn thảo toàn bộ từ Điều 1 đến hết hợp đồng trong một khung duy nhất.
+                  </p>
+                  <p className="text-slate-600 mt-0.5">
+                    • <strong>Canh lề & thụt dòng chuẩn:</strong> Sử dụng các nút trên thanh công cụ phía trên để áp dụng <strong>Căn đều 2 bên (Justify)</strong>, <strong>Thụt đầu dòng {paragraphIndent}cm</strong>, <strong>Dãn dòng {lineHeight}x</strong> và lề A4 chuẩn đóng gáy (Trái 3cm, Phải 2cm, Trên 2cm, Dưới 2cm) theo Nghị định 30/2020/NĐ-CP.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowGuideBanner(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-200/50 cursor-pointer"
+                title="Đóng thông báo"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
           {/* WORD HORIZONTAL RULER (Top Margin Indicator) */}
           {showRuler && (
             <div 
@@ -586,20 +819,30 @@ export const ContractDocumentView: React.FC<ContractDocumentViewProps> = ({
                 {/* PHYSICAL A4 PAPER SHEET */}
                 <div className="a4-word-page bg-white shadow-2xl border border-slate-300 relative text-black">
                   {/* Page Top Header (According to Admin Layout Standards) */}
-                  <div className="page-header select-none flex items-center justify-between text-[10pt] text-slate-500 font-serif border-b border-slate-200 pb-2 mb-6">
-                    <span className="italic">
-                      Chi nhánh Vận tải đường sắt Nha Trang
-                    </span>
-                    {showPageNumbers && (
-                      <span className="font-semibold text-slate-700">
-                        {page.pageNumber > 1 ? `- ${page.pageNumber} -` : `Hợp đồng số: ${contract.contractNumber}`}
+                  {/* IMPORTANT: Page 1 MUST NOT have running header (removes the red highlighted bar requested by user) */}
+                  {page.pageNumber > 1 && showRunningHeader && (
+                    <div className="page-header select-none flex items-center justify-between text-[10pt] text-slate-500 font-serif border-b border-slate-200 pb-2 mb-6">
+                      <span className="italic text-slate-500">
+                        Tập đoàn Đường sắt Quốc gia Việt Nam - Chi nhánh Nha Trang
                       </span>
-                    )}
-                  </div>
+                      {showPageNumbers && (
+                        <span className="font-semibold text-slate-700">
+                          - {page.pageNumber} -
+                        </span>
+                      )}
+                    </div>
+                  )}
 
                   {/* Document Page HTML Body */}
                   <div 
-                    className="page-content font-serif leading-relaxed text-[12pt] text-justify"
+                    className="page-content font-serif leading-relaxed text-justify cursor-pointer"
+                    style={{
+                      textAlign,
+                      lineHeight,
+                      fontSize: `${fontSize}pt`,
+                    }}
+                    onClick={handleDocumentClick}
+                    title="Bấm vào nội dung để xem / chỉnh sửa điều khoản tương ứng"
                     dangerouslySetInnerHTML={{ __html: page.htmlContent }} 
                   />
 
@@ -702,6 +945,30 @@ export const ContractDocumentView: React.FC<ContractDocumentViewProps> = ({
 
         .a4-word-page .page-content {
           flex: 1;
+        }
+
+        .page-content {
+          text-align: ${textAlign};
+          line-height: ${lineHeight};
+        }
+
+        .page-content p:not([style*="text-align"]) {
+          text-align: ${textAlign};
+        }
+
+        .page-content p:not([style*="line-height"]) {
+          line-height: ${lineHeight};
+        }
+
+        .page-content [data-clause] {
+          transition: all 0.15s ease-in-out;
+          border-radius: 4px;
+        }
+
+        .page-content [data-clause]:hover {
+          background-color: rgba(37, 99, 235, 0.03);
+          outline: 1.5px dashed #3b82f6;
+          outline-offset: 4px;
         }
 
         @media screen and (max-width: 860px) {

@@ -1,7 +1,7 @@
 import { WorkerContractor, Contract, AcceptanceReport, PartyAInfo } from '../types';
 
 export const DEFAULT_PARTY_A: PartyAInfo = {
-  organizationName: 'CHI NHÁNH VẬN TẢI ĐƯỜNG SẮT NHA TRANG',
+  organizationName: 'TẬP ĐOÀN ĐƯỜNG SẮT QUỐC GIA VIỆT NAM - CHI NHÁNH VẬN TẢI ĐƯỜNG SẮT NHA TRANG',
   address: '17 Thái Nguyên, Phường Nha Trang, Tỉnh Khánh Hòa',
   taxCode: '0110879376-008',
   representativeName: 'Ông Lê Quang Chính',

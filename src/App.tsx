@@ -9,23 +9,44 @@ import { BudgetCharts } from './components/BudgetCharts';
 import { WorkerDirectory } from './components/WorkerDirectory';
 import { LegalHrConsultant } from './components/LegalHrConsultant';
 import { GoogleSheetDesignView } from './components/GoogleSheetDesignView';
+import { UserManagementView } from './components/UserManagementView';
+import { LoginForm } from './components/LoginForm';
 
-import { Contract, WorkerContractor, AcceptanceReport, UserRole } from './types';
+import { Contract, WorkerContractor, AcceptanceReport, UserRole, AppAccount } from './types';
 import { loadData, saveData, resetToDefaultData } from './services/storage';
 import { exportBudgetSummaryToExcel, exportAcceptancesToExcel } from './services/exportExcel';
-import { getStoredUserRole, saveUserRole, getUserRoleProfile } from './services/authRoles';
+import { getStoredUserRole, saveUserRole, getUserRoleProfile, getStoredUser, logoutUser, APP_ACCOUNTS_LIST } from './services/authRoles';
 import { RotateCcw } from 'lucide-react';
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<AppAccount | null>(() => getStoredUser());
   const [workers, setWorkers] = useState<WorkerContractor[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [acceptances, setAcceptances] = useState<AcceptanceReport[]>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>('contracts');
-  const [currentRole, setCurrentRole] = useState<UserRole>(() => getStoredUserRole());
+  const [currentRole, setCurrentRole] = useState<UserRole>(() => {
+    const user = getStoredUser();
+    return user ? user.role : getStoredUserRole();
+  });
+
+  const handleLoginSuccess = (account: AppAccount) => {
+    setCurrentUser(account);
+    setCurrentRole(account.role);
+    saveUserRole(account.role);
+  };
+
+  const handleLogout = () => {
+    logoutUser();
+    setCurrentUser(null);
+  };
 
   const handleRoleChange = (role: UserRole) => {
     setCurrentRole(role);
     saveUserRole(role);
+    const matchedAccount = APP_ACCOUNTS_LIST.find(a => a.role === role);
+    if (matchedAccount) {
+      setCurrentUser(matchedAccount);
+    }
   };
 
   // Document inspection state
@@ -34,12 +55,15 @@ export default function App() {
   // Modal states
   const [isContractModalOpen, setIsContractModalOpen] = useState(false);
   const [contractToEdit, setContractToEdit] = useState<Contract | null>(null);
+  const [contractModalInitialTab, setContractModalInitialTab] = useState<'basic' | 'clauses' | 'safety' | 'preview'>('basic');
+  const [contractModalFocusClause, setContractModalFocusClause] = useState<number | undefined>(undefined);
 
   const [isAcceptanceModalOpen, setIsAcceptanceModalOpen] = useState(false);
   const [acceptanceToEdit, setAcceptanceToEdit] = useState<AcceptanceReport | null>(null);
   const [acceptanceInitialContract, setAcceptanceInitialContract] = useState<Contract | null>(null);
 
   const [selectedAuditContractId, setSelectedAuditContractId] = useState<string>('');
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
 
   // Load data on mount
   useEffect(() => {
@@ -82,12 +106,25 @@ export default function App() {
 
   const handleOpenCreateContract = () => {
     setContractToEdit(null);
+    setContractModalInitialTab('basic');
+    setContractModalFocusClause(undefined);
     setIsContractModalOpen(true);
   };
 
-  const handleOpenEditContract = (c: Contract) => {
+  const handleOpenEditContract = (c: Contract, tab: 'basic' | 'clauses' | 'safety' | 'preview' = 'basic', clause?: number) => {
     setContractToEdit(c);
+    setContractModalInitialTab(tab);
+    setContractModalFocusClause(clause);
     setIsContractModalOpen(true);
+  };
+
+  const handleDeleteContract = (contractId: string) => {
+    const updatedContracts = contracts.filter(c => c.id !== contractId);
+    const updatedAcceptances = acceptances.filter(a => a.contractId !== contractId);
+    updateData(updatedContracts, workers, updatedAcceptances);
+    if (viewingContract?.id === contractId) {
+      setViewingContract(null);
+    }
   };
 
   // Acceptance Handlers
@@ -169,13 +206,16 @@ export default function App() {
   };
 
   const handleResetSampleData = () => {
-    if (window.confirm('Khôi phục dữ liệu mẫu ban đầu của Chi nhánh Vận tải đường sắt Nha Trang?')) {
-      const reset = resetToDefaultData();
-      setWorkers(reset.workers);
-      setContracts(reset.contracts);
-      setAcceptances(reset.acceptances);
-      setViewingContract(null);
-    }
+    setIsResetConfirmOpen(true);
+  };
+
+  const handleConfirmReset = () => {
+    const reset = resetToDefaultData();
+    setWorkers(reset.workers);
+    setContracts(reset.contracts);
+    setAcceptances(reset.acceptances);
+    setViewingContract(null);
+    setIsResetConfirmOpen(false);
   };
 
   // Worker lookup for currently viewed contract
@@ -185,6 +225,11 @@ export default function App() {
   const viewingContractAcceptances = viewingContract
     ? acceptances.filter(a => a.contractId === viewingContract.id)
     : [];
+
+  // If user is not logged in, show authentication form with role profiles
+  if (!currentUser) {
+    return <LoginForm onLoginSuccess={handleLoginSuccess} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col selection:bg-blue-100 selection:text-blue-900">
@@ -198,11 +243,13 @@ export default function App() {
         onNewContract={handleOpenCreateContract}
         onExportExcel={handleQuickExportExcel}
         currentRole={currentRole}
+        currentUser={currentUser}
         onRoleChange={handleRoleChange}
+        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="flex-1 max-w-7xl xl:max-w-[1440px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* If viewing a contract document in official A4 format */}
         {viewingContract && viewingContractWorker ? (
           <ContractDocumentView
@@ -210,9 +257,11 @@ export default function App() {
             worker={viewingContractWorker}
             acceptances={viewingContractAcceptances}
             onBack={() => setViewingContract(null)}
-            onEdit={() => handleOpenEditContract(viewingContract)}
+            onEdit={(tab = 'clauses', clause) => handleOpenEditContract(viewingContract, tab, clause)}
             onCheckLegal={() => handleCheckLegalForContract(viewingContract.id)}
             currentRole={currentRole}
+            onUpdateContract={handleSaveContract}
+            onDeleteContract={handleDeleteContract}
           />
         ) : (
           <>
@@ -224,6 +273,7 @@ export default function App() {
                 onSelectContract={handleSelectContract}
                 onNewContract={handleOpenCreateContract}
                 onEditContract={handleOpenEditContract}
+                onDeleteContract={handleDeleteContract}
                 onNewAcceptanceForContract={(c) => handleOpenCreateAcceptance(c)}
                 currentRole={currentRole}
               />
@@ -248,6 +298,7 @@ export default function App() {
                 contracts={contracts}
                 acceptances={acceptances}
                 onSelectWorker={handleSelectWorkerFromBudget}
+                currentRole={currentRole}
               />
             )}
 
@@ -274,6 +325,19 @@ export default function App() {
                 contracts={contracts}
                 workers={workers}
                 acceptances={acceptances}
+              />
+            )}
+
+            {activeTab === 'users' && (
+              <UserManagementView
+                currentUser={currentUser}
+                onRefreshUsers={() => {
+                  const refreshed = getStoredUser();
+                  if (refreshed) {
+                    setCurrentUser(refreshed);
+                    setCurrentRole(refreshed.role);
+                  }
+                }}
               />
             )}
           </>
@@ -310,6 +374,8 @@ export default function App() {
         workers={workers}
         contractToEdit={contractToEdit}
         currentRole={currentRole}
+        initialTab={contractModalInitialTab}
+        focusClause={contractModalFocusClause}
       />
 
       <AcceptanceEditorModal
@@ -322,6 +388,33 @@ export default function App() {
         reportToEdit={acceptanceToEdit}
         currentRole={currentRole}
       />
+
+      {isResetConfirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <h3 className="text-base font-bold text-slate-900">Xác nhận khôi phục dữ liệu mẫu</h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Bạn có chắc chắn muốn khôi phục dữ liệu mẫu ban đầu của Chi nhánh Vận tải đường sắt Nha Trang? Toàn bộ các thay đổi cục bộ sẽ được hoàn tác về dữ liệu chuẩn.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsResetConfirmOpen(false)}
+                className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReset}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg cursor-pointer shadow-xs"
+              >
+                Khôi phục dữ liệu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

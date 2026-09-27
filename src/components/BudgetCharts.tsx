@@ -13,15 +13,17 @@ import {
   ShieldCheck,
   ChevronRight
 } from 'lucide-react';
-import { WorkerContractor, Contract, AcceptanceReport, WorkerBudgetSummary } from '../types';
+import { WorkerContractor, Contract, AcceptanceReport, WorkerBudgetSummary, UserRole } from '../types';
 import { formatNumber, formatVND } from '../services/numberToWords';
 import { exportBudgetSummaryToExcel } from '../services/exportExcel';
+import { getUserRoleProfile } from '../services/authRoles';
 
 interface BudgetChartsProps {
   workers: WorkerContractor[];
   contracts: Contract[];
   acceptances: AcceptanceReport[];
   onSelectWorker: (workerId: string) => void;
+  currentRole?: UserRole;
 }
 
 export const BudgetCharts: React.FC<BudgetChartsProps> = ({
@@ -29,8 +31,18 @@ export const BudgetCharts: React.FC<BudgetChartsProps> = ({
   contracts,
   acceptances,
   onSelectWorker,
+  currentRole = 'admin',
 }) => {
-  const [selectedStation, setSelectedStation] = useState<string>('all');
+  const roleProfile = getUserRoleProfile(currentRole);
+  const [selectedStation, setSelectedStation] = useState<string>(
+    roleProfile.isStation ? roleProfile.stationName.replace('Ga ', '') : 'all'
+  );
+
+  React.useEffect(() => {
+    if (roleProfile.isStation) {
+      setSelectedStation(roleProfile.stationName.replace('Ga ', ''));
+    }
+  }, [currentRole]);
 
   // Compute budget summaries for each worker
   const summaries: WorkerBudgetSummary[] = workers.map(worker => {
@@ -135,6 +147,8 @@ export const BudgetCharts: React.FC<BudgetChartsProps> = ({
             >
               <option value="all">Tất cả các Ga đường sắt</option>
               <option value="Nha Trang">Ga Nha Trang</option>
+              <option value="Tuy Hòa">Ga Tuy Hòa</option>
+              <option value="Diêu Trì">Ga Diêu Trì</option>
               <option value="Tháp Chàm">Ga Tháp Chàm</option>
               <option value="Diên Khánh">Ga Diên Khánh</option>
               <option value="Ninh Hòa">Ga Ninh Hòa</option>

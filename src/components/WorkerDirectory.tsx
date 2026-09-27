@@ -74,6 +74,7 @@ export const WorkerDirectory: React.FC<WorkerDirectoryProps> = ({
   const [hasTaxCommitmentForm, setHasTaxCommitmentForm] = useState(false);
   const [allocatedBudget, setAllocatedBudget] = useState<number>(50000000);
   const [notes, setNotes] = useState('');
+  const [modalError, setModalError] = useState<string | null>(null);
 
   // Statistics calculation
   const totalWorkers = workers.length;
@@ -129,8 +130,9 @@ export const WorkerDirectory: React.FC<WorkerDirectoryProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setModalError(null);
     if (!fullName.trim() || !cccdNumber.trim()) {
-      alert('Vui lòng nhập Họ tên và số CCCD');
+      setModalError('Vui lòng nhập Họ tên và số CCCD');
       return;
     }
 
@@ -970,6 +972,12 @@ export const WorkerDirectory: React.FC<WorkerDirectoryProps> = ({
                   </label>
                 )}
               </div>
+
+              {modalError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg">
+                  {modalError}
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
                 <button

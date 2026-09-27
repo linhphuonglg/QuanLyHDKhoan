@@ -125,17 +125,58 @@ ${!isCargoDual ? `- Trường hợp Bên B ước tính tổng thu nhập trong 
   };
 }
 
-function renderParagraphsHtml(rawText: string): string {
+export function getDefaultFullContractContent(contract: Contract, worker: WorkerContractor): string {
+  const defaults = getDefaultContractClauses(contract, worker);
+  return `
+<p style="font-weight: bold; margin: 10px 0 6px 0; color: #111;">ĐIỀU 1: PHẠM VI, NỘI DUNG VÀ NGUYÊN TẮC THỰC HIỆN CÔNG VIỆC</p>
+${renderParagraphsHtml(defaults.article1)}
+
+<p style="font-weight: bold; margin: 14px 0 6px 0; color: #111;">ĐIỀU 2: ĐƠN GIÁ KHOÁN VÀ PHƯƠNG THỨC THANH TOÁN</p>
+${renderParagraphsHtml(defaults.article2)}
+
+<p style="font-weight: bold; margin: 14px 0 6px 0; color: #111;">ĐIỀU 3: BẢO HIỂM XÃ HỘI VÀ THUẾ THU NHẬP CÁ NHÂN (TNCN)</p>
+${renderParagraphsHtml(defaults.article3)}
+
+<p style="font-weight: bold; margin: 14px 0 6px 0; color: #111;">ĐIỀU 4: AN TOÀN LAO ĐỘNG VÀ BỒI THƯỜNG THIỆT HẠI</p>
+${renderParagraphsHtml(defaults.article4)}
+
+<p style="font-weight: bold; margin: 14px 0 6px 0; color: #111;">ĐIỀU 5: ĐIỀU KHOẢN THI HÀNH</p>
+${renderParagraphsHtml(defaults.article5)}
+`.trim();
+}
+
+function renderParagraphsHtml(
+  rawText: string,
+  formatting?: {
+    indent?: string;
+    textAlign?: string;
+    lineHeight?: number;
+  }
+): string {
   if (!rawText) return '';
+  const indent = formatting?.indent !== undefined ? formatting.indent : '1.27cm';
+  const textAlign = formatting?.textAlign || 'justify';
+  const lineHeight = formatting?.lineHeight || 1.45;
+
+  // Check if rawText contains block HTML elements from the WYSIWYG editor
+  const hasBlockTags = /<(p|div|ul|ol|li|h[1-6]|table|blockquote)[^>]*>/i.test(rawText);
+  if (hasBlockTags) {
+    // Rich HTML from WYSIWYG: return directly to preserve all custom formatting, bold, italics, alignments
+    return rawText;
+  }
+
   return rawText
     .split('\n')
     .map(line => {
       const trimmed = line.trim();
       if (!trimmed) return '';
-      if (trimmed.startsWith('-')) {
-        return `<p style="margin: 3px 0 3px 15px;">${trimmed}</p>`;
+      if (trimmed.startsWith('-') || trimmed.startsWith('*') || trimmed.startsWith('+')) {
+        return `<p style="margin: 4px 0 4px 22px; text-align: ${textAlign}; line-height: ${lineHeight}; text-indent: -12px; padding-left: 12px;">${trimmed}</p>`;
       }
-      return `<p style="margin: 3px 0;">${trimmed}</p>`;
+      if (/^[0-9]+\.\s/.test(trimmed)) {
+        return `<p style="margin: 6px 0 4px 0; text-align: ${textAlign}; line-height: ${lineHeight}; text-indent: ${indent}; font-weight: 500;">${trimmed}</p>`;
+      }
+      return `<p style="margin: 4px 0; text-align: ${textAlign}; line-height: ${lineHeight}; text-indent: ${indent};">${trimmed}</p>`;
     })
     .filter(Boolean)
     .join('');
@@ -149,19 +190,43 @@ export function getContractPages(contract: Contract, worker: WorkerContractor): 
 
   const defaults = getDefaultContractClauses(contract, worker);
   const custom = contract.customContent;
+  const fmt = custom?.formatting;
+
+  const formattingOptions = {
+    indent: fmt?.paragraphIndent !== undefined ? `${fmt.paragraphIndent}cm` : '1.27cm',
+    textAlign: fmt?.textAlign || 'justify',
+    lineHeight: fmt?.lineHeight || 1.45,
+  };
 
   const title = custom?.customTitle || defaults.title;
-  const legalBasisHtml = renderParagraphsHtml(custom?.customLegalBasis || defaults.legalBasis);
-  const art1Html = renderParagraphsHtml(custom?.customArticle1 || defaults.article1);
-  const art2Html = renderParagraphsHtml(custom?.customArticle2 || defaults.article2);
-  const art3Html = renderParagraphsHtml(custom?.customArticle3 || defaults.article3);
-  const art4Html = renderParagraphsHtml(custom?.customArticle4 || defaults.article4);
-  const art5Html = renderParagraphsHtml(custom?.customArticle5 || defaults.article5);
+  const legalBasisHtml = renderParagraphsHtml(custom?.customLegalBasis || defaults.legalBasis, formattingOptions);
+  const art1Html = renderParagraphsHtml(custom?.customArticle1 || defaults.article1, formattingOptions);
+  const art2Html = renderParagraphsHtml(custom?.customArticle2 || defaults.article2, formattingOptions);
+  const art3Html = renderParagraphsHtml(custom?.customArticle3 || defaults.article3, formattingOptions);
+  const art4Html = renderParagraphsHtml(custom?.customArticle4 || defaults.article4, formattingOptions);
+  const art5Html = renderParagraphsHtml(custom?.customArticle5 || defaults.article5, formattingOptions);
   const notesHtml = custom?.customNotes ? `
     <div style="margin-top: 10px; font-size: 10.5pt; font-style: italic; background-color: #f8fafc; padding: 6px 10px; border-left: 3px solid #0f5499;">
       <strong>Ghi chú bổ sung từ Chi nhánh:</strong> ${custom.customNotes}
     </div>
   ` : '';
+
+  // Splitting full contract into Page 1 and Page 2 at Điều 3
+  const rawFullContract = (custom?.customFullContract && custom.customFullContract.trim())
+    ? custom.customFullContract.trim()
+    : getDefaultFullContractContent(contract, worker);
+
+  let fullPart1 = '';
+  let fullPart2 = '';
+  const fullHtml = renderParagraphsHtml(rawFullContract, formattingOptions);
+  const d3Match = fullHtml.search(/(<[^>]*>)*\s*(?:ĐIỀU|Điều)\s*3[\s\:\.]/i);
+  if (d3Match !== -1) {
+    fullPart1 = fullHtml.substring(0, d3Match).trim();
+    fullPart2 = fullHtml.substring(d3Match).trim();
+  } else {
+    fullPart1 = fullHtml;
+    fullPart2 = '';
+  }
 
   if (isCargoPrinciple) {
     const page1Html = `
@@ -169,9 +234,9 @@ export function getContractPages(contract: Contract, worker: WorkerContractor): 
       <table style="width: 100%; border: none; margin-bottom: 20px;">
         <tr>
           <td style="width: 48%; vertical-align: top; text-align: center;">
-            <div style="font-size: 11pt; font-weight: bold; text-transform: uppercase; line-height: 1.35; text-align: center;">
-              <div>CHI NHÁNH</div>
-              <div>VẬN TẢI ĐƯỜNG SẮT NHA TRANG</div>
+            <div style="font-size: 10pt; font-weight: bold; text-transform: uppercase; line-height: 1.3; text-align: center;">
+              <div>TẬP ĐOÀN ĐƯỜNG SẮT QUỐC GIA VIỆT NAM</div>
+              <div style="margin-top: 2px;">CHI NHÁNH VẬN TẢI ĐƯỜNG SẮT NHA TRANG</div>
             </div>
             <div style="font-size: 10pt; font-style: italic; margin-top: 4px; text-align: center;">
               Số: ${contract.contractNumber || '...... /20.../HĐNT-VTHN-NT'}
@@ -263,42 +328,16 @@ export function getContractPages(contract: Contract, worker: WorkerContractor): 
         Hai bên cùng thống nhất ký kết Hợp đồng nguyên tắc với các điều khoản cụ thể sau:
       </p>
 
-      <!-- ĐIỀU 1 -->
-      <div style="font-size: 11pt; line-height: 1.5; margin-bottom: 14px;">
-        <p style="font-weight: bold; margin: 4px 0;">ĐIỀU 1: PHẠM VI VÀ NGUYÊN TẮC THỰC HIỆN CÔNG VIỆC</p>
-        ${art1Html}
-      </div>
-
-      <!-- ĐIỀU 2 -->
-      <div style="font-size: 11pt; line-height: 1.5; margin-bottom: 14px;">
-        <p style="font-weight: bold; margin: 4px 0;">ĐIỀU 2: ĐƠN GIÁ KHOÁN VÀ PHƯƠNG THỨC THANH TOÁN</p>
-        ${art2Html}
+      <!-- ĐIỀU KHOẢN TRANG 1 -->
+      <div data-clause="full" class="clause-section" style="font-size: 11pt; line-height: 1.5; margin-bottom: 14px; padding: 4px; border-radius: 4px; position: relative;">
+        ${fullPart1}
       </div>
     `;
 
     const page2Html = `
-      <!-- TIÊU ĐỀ ĐẦU TRANG 2 -->
-      <div style="font-size: 10pt; font-style: italic; color: #555; border-bottom: 1px solid #ddd; padding-bottom: 5px; margin-bottom: 18px; display: flex; justify-content: space-between;">
-        <span>Chi nhánh Vận tải đường sắt Nha Trang</span>
-        <span>Hợp đồng số: ${contract.contractNumber} (Trang 2)</span>
-      </div>
-
-      <!-- ĐIỀU 3 -->
-      <div style="font-size: 11pt; line-height: 1.5; margin-bottom: 14px;">
-        <p style="font-weight: bold; margin: 4px 0;">ĐIỀU 3: BẢO HIỂM XÃ HỘI VÀ THUẾ THU NHẬP CÁ NHÂN (TNCN)</p>
-        ${art3Html}
-      </div>
-
-      <!-- ĐIỀU 4 -->
-      <div style="font-size: 11pt; line-height: 1.5; margin-bottom: 14px;">
-        <p style="font-weight: bold; margin: 4px 0;">ĐIỀU 4: AN TOÀN LAO ĐỘNG VÀ BỒI THƯỜNG THIỆT HẠI</p>
-        ${art4Html}
-      </div>
-
-      <!-- ĐIỀU 5 -->
-      <div style="font-size: 11pt; line-height: 1.5; margin-bottom: 24px;">
-        <p style="font-weight: bold; margin: 4px 0;">ĐIỀU 5: ĐIỀU KHOẢN THI HÀNH</p>
-        ${art5Html}
+      <!-- ĐIỀU KHOẢN TRANG 2 -->
+      <div data-clause="full" class="clause-section" style="font-size: 11pt; line-height: 1.5; margin-bottom: 24px; padding: 4px; border-radius: 4px; position: relative;">
+        ${fullPart2}
         ${notesHtml}
       </div>
 
@@ -352,9 +391,9 @@ export function getContractPages(contract: Contract, worker: WorkerContractor): 
     <table style="width: 100%; border: none; margin-bottom: 20px;">
       <tr>
         <td style="width: 48%; vertical-align: top; text-align: center;">
-          <div style="font-size: 11pt; font-weight: bold; text-transform: uppercase; line-height: 1.35; text-align: center;">
-            <div>CHI NHÁNH</div>
-            <div>VẬN TẢI ĐƯỜNG SẮT NHA TRANG</div>
+          <div style="font-size: 10pt; font-weight: bold; text-transform: uppercase; line-height: 1.3; text-align: center;">
+            <div>TẬP ĐOÀN ĐƯỜNG SẮT QUỐC GIA VIỆT NAM</div>
+            <div style="margin-top: 2px;">CHI NHÁNH VẬN TẢI ĐƯỜNG SẮT NHA TRANG</div>
           </div>
           <div style="font-size: 10pt; font-style: italic; margin-top: 4px; text-align: center;">
             Số: ${contract.contractNumber || '...... /20.../HĐGK-SP-NT'}
@@ -467,42 +506,16 @@ export function getContractPages(contract: Contract, worker: WorkerContractor): 
       Hai bên cùng thống nhất ký kết Hợp đồng nguyên tắc với các điều khoản cụ thể sau:
     </p>
 
-    <!-- ĐIỀU 1 -->
-    <div style="font-size: 11pt; line-height: 1.5; margin-bottom: 14px;">
-      <p style="font-weight: bold; margin: 4px 0;">ĐIỀU 1: PHẠM VI, NỘI DUNG VÀ NGUYÊN TẮC THỰC HIỆN CÔNG VIỆC</p>
-      ${art1Html}
-    </div>
-
-    <!-- ĐIỀU 2 -->
-    <div style="font-size: 11pt; line-height: 1.5; margin-bottom: 12px;">
-      <p style="font-weight: bold; margin: 4px 0;">ĐIỀU 2: ĐƠN GIÁ KHOÁN VÀ PHƯƠNG THỨC THANH TOÁN</p>
-      ${art2Html}
+    <!-- ĐIỀU KHOẢN TRANG 1 -->
+    <div data-clause="full" class="clause-section" style="font-size: 11pt; line-height: 1.5; margin-bottom: 14px; padding: 4px; border-radius: 4px; position: relative;">
+      ${fullPart1}
     </div>
   `;
 
   const page2Html = `
-    <!-- TIÊU ĐỀ ĐẦU TRANG 2 -->
-    <div style="font-size: 10pt; font-style: italic; color: #555; border-bottom: 1px solid #ddd; padding-bottom: 5px; margin-bottom: 18px; display: flex; justify-content: space-between;">
-      <span>Chi nhánh Vận tải đường sắt Nha Trang</span>
-      <span>Hợp đồng số: ${contract.contractNumber} (Trang 2)</span>
-    </div>
-
-    <!-- ĐIỀU 3 -->
-    <div style="font-size: 11pt; line-height: 1.5; margin-bottom: 14px;">
-      <p style="font-weight: bold; margin: 4px 0;">ĐIỀU 3: BẢO HIỂM XÃ HỘI VÀ THUẾ THU NHẬP CÁ NHÂN (TNCN)</p>
-      ${art3Html}
-    </div>
-
-    <!-- ĐIỀU 4 -->
-    <div style="font-size: 11pt; line-height: 1.5; margin-bottom: 14px;">
-      <p style="font-weight: bold; margin: 4px 0;">ĐIỀU 4: AN TOÀN LAO ĐỘNG VÀ BỒI THƯỜNG THIỆT HẠI</p>
-      ${art4Html}
-    </div>
-
-    <!-- ĐIỀU 5 -->
-    <div style="font-size: 11pt; line-height: 1.5; margin-bottom: 24px;">
-      <p style="font-weight: bold; margin: 4px 0;">ĐIỀU 5: ĐIỀU KHOẢN THI HÀNH</p>
-      ${art5Html}
+    <!-- ĐIỀU KHOẢN TRANG 2 -->
+    <div data-clause="full" class="clause-section" style="font-size: 11pt; line-height: 1.5; margin-bottom: 24px; padding: 4px; border-radius: 4px; position: relative;">
+      ${fullPart2}
       ${notesHtml}
     </div>
 
@@ -592,14 +605,41 @@ export function generateContractHtmlContent(contract: Contract, worker: WorkerCo
   `;
 }
 
+export function getDefaultSafetyCommitmentContent(contract?: Contract, worker?: WorkerContractor): string {
+  return `
+<p style="margin: 6px 0; font-style: italic;">Sau khi được đại diện Chi nhánh phổ biến các quy định về an toàn chạy tàu và an toàn tại khu vực tác nghiệp ke ga, bãi hàng, đường ray, tôi xin tự nguyện cam kết thực hiện nghiêm túc các nội dung sau:</p>
+
+<p style="margin: 8px 0;"><strong>1. Về điều kiện sức khỏe:</strong> Tôi cam đoan bản thân hoàn toàn có đủ sức khỏe thể chất và tinh thần để thực hiện công việc; không mắc các bệnh mãn tính nguy hiểm (tim mạch, động kinh, huyết áp cao, suy giảm thị lực/thính lực...).</p>
+
+<p style="margin: 8px 0;"><strong>2. Về trang bị bảo hộ lao động:</strong> Tôi cam kết tự trang bị và sử dụng đầy đủ các trang thiết bị bảo hộ phù hợp trong suốt quá trình làm việc, bao gồm:</p>
+<p style="margin: 3px 0 3px 20px;">- Giày/ủng cao su có đế chống trơn trượt (đặc biệt khi thực hiện xịt rửa toa xe bằng nước áp lực hoặc bốc dỡ hàng hóa trên bãi);</p>
+<p style="margin: 3px 0 3px 20px;">- Găng tay bảo hộ, khẩu trang, mũ bảo hộ che đầu;</p>
+<p style="margin: 3px 0 3px 20px;">- Áo phản quang khi làm việc vào ban đêm hoặc trong khu vực ray chạy tàu.</p>
+
+<p style="margin: 8px 0;"><strong>3. Về quy tắc an toàn trong khu vực đường sắt:</strong></p>
+<p style="margin: 3px 0 3px 20px;">- Tuyệt đối tuân thủ chỉ dẫn của Trực ban ga, Điều độ bãi dồn và nhân viên phụ trách an toàn của Bên A;</p>
+<p style="margin: 3px 0 3px 20px;">- Chỉ làm việc đúng vị trí toa xe được phân công; tuyệt đối không tự ý đi lại trên các làn đường ray khác;</p>
+<p style="margin: 3px 0 3px 20px;">- Không chui qua gầm toa xe, không ngồi nghỉ trên đường ray hoặc đứng giữa hai toa xe đang dồn dịch;</p>
+<p style="margin: 3px 0 3px 20px;">- Chú ý quan sát tín hiệu đèn, biển báo, lắng nghe còi tàu trước khi di chuyển qua các vị trí giao cắt;</p>
+<p style="margin: 3px 0 3px 20px;">- Tuyệt đối không sử dụng rượu, bia, chất kích thích trước và trong quá trình làm việc tại ga.</p>
+
+<p style="margin: 8px 0;"><strong>4. Về trách nhiệm an toàn thân thể và rủi ro:</strong></p>
+<p style="margin: 3px 0 3px 20px;">- Tôi xác nhận đây là công việc giao khoán theo sản phẩm dân sự. Tôi cam kết tự chịu hoàn toàn trách nhiệm về sự an toàn tính mạng, sức khỏe của bản thân trong quá trình làm việc.</p>
+<p style="margin: 3px 0 3px 20px;">- Trường hợp xảy ra tai nạn, rủi ro do bản thân sơ suất, không cẩn thận, hoặc do vi phạm các quy tắc an toàn đã được cảnh báo ở trên, tôi xin tự gánh chịu toàn bộ chi phí điều trị, hồi phục và cam kết không khiếu nại, khiếu kiện, không đòi hỏi Chi nhánh Vận tải đường sắt Nha Trang phải bồi thường bất kỳ khoản tiền nào.</p>
+`.trim();
+}
+
 export function generateSafetyCommitmentHtml(contract: Contract, worker: WorkerContractor): string {
   const isCargoDual = contract.templateType === 'CARGO_DUAL_EMPLOYER';
   const isCargoPrinciple = contract.templateType === 'CARGO_PRINCIPLE_VTHN';
   const isCargo = isCargoDual || isCargoPrinciple;
   const workType = isCargo ? 'bốc dỡ, chuyển tải hàng hóa' : 'vệ sinh, rửa toa xe';
 
-  if (isCargoPrinciple) {
-    // Exact text from Page 4 of PDF
+  const customContent = contract.customContent?.customSafetyCommitment?.trim();
+  const commitmentBodyHtml = customContent || getDefaultSafetyCommitmentContent(contract, worker);
+
+  if (isCargoPrinciple && !customContent) {
+    // Exact text from Page 4 of PDF when no custom override is set
     return `
     <div class="doc-page" style="font-family: 'Times New Roman', 'Tinos', Times, Georgia, serif; font-size: 12pt; line-height: 1.5; color: #000; page-break-before: always;">
       <!-- QUỐC HIỆU TIÊU NGỮ -->
@@ -693,25 +733,9 @@ export function generateSafetyCommitmentHtml(contract: Contract, worker: WorkerC
         <p style="margin: 4px 0;">Là Bên nhận khoán công việc <strong>${workType}</strong> theo Hợp đồng số: <strong>${contract.contractNumber}</strong> tại khu vực: <strong>${contract.stationLocation}</strong>.</p>
       </div>
 
-      <p style="font-size: 11pt; font-style: italic; line-height: 1.5; margin-bottom: 14px;">
-        Sau khi được đại diện Chi nhánh phổ biến các quy định về an toàn chạy tàu và an toàn tại khu vực tác nghiệp ke ga, bãi hàng, đường ray, tôi xin tự nguyện cam kết thực hiện nghiêm túc các nội dung sau:
-      </p>
-
-      <div style="font-size: 11pt; line-height: 1.6; margin-bottom: 20px;">
-        <p style="margin: 6px 0;"><strong>1. Về điều kiện sức khỏe:</strong> Tôi cam đoan bản thân hoàn toàn có đủ sức khỏe thể chất và tinh thần để thực hiện công việc; không mắc các bệnh mãn tính nguy hiểm (tim mạch, động kinh, huyết áp cao, suy giảm thị lực/thính lực...).</p>
-        <p style="margin: 6px 0;"><strong>2. Về trang bị bảo hộ lao động:</strong> Tôi cam kết tự trang bị và sử dụng đầy đủ các trang thiết bị bảo hộ phù hợp trong suốt quá trình làm việc, bao gồm:</p>
-        <p style="margin: 3px 0 3px 20px;">- Giày/ủng cao su có đế chống trơn trượt (đặc biệt khi thực hiện xịt rửa toa xe bằng nước áp lực hoặc bốc dỡ hàng hóa trên bãi);</p>
-        <p style="margin: 3px 0 3px 20px;">- Găng tay bảo hộ, khẩu trang, mũ bảo hộ che đầu;</p>
-        <p style="margin: 3px 0 3px 20px;">- Áo phản quang khi làm việc vào ban đêm hoặc trong khu vực ray chạy tàu.</p>
-        <p style="margin: 6px 0;"><strong>3. Về quy tắc an toàn trong khu vực đường sắt:</strong></p>
-        <p style="margin: 3px 0 3px 20px;">- Tuyệt đối tuân thủ chỉ dẫn của Trực ban ga, Điều độ bãi dồn và nhân viên phụ trách an toàn của Bên A;</p>
-        <p style="margin: 3px 0 3px 20px;">- Chỉ làm việc đúng vị trí toa xe được phân công; tuyệt đối không tự ý đi lại trên các làn đường ray khác;</p>
-        <p style="margin: 3px 0 3px 20px;">- Không chui qua gầm toa xe, không ngồi nghỉ trên đường ray hoặc đứng giữa hai toa xe đang dồn dịch;</p>
-        <p style="margin: 3px 0 3px 20px;">- Chú ý quan sát tín hiệu đèn, biển báo, lắng nghe còi tàu trước khi di chuyển qua các vị trí giao cắt;</p>
-        <p style="margin: 3px 0 3px 20px;">- Tuyệt đối không sử dụng rượu, bia, chất kích thích trước và trong quá trình làm việc tại ga.</p>
-        <p style="margin: 6px 0;"><strong>4. Về trách nhiệm an toàn thân thể và rủi ro:</strong></p>
-        <p style="margin: 3px 0 3px 20px;">- Tôi xác nhận đây là công việc giao khoán theo sản phẩm dân sự. Tôi cam kết tự chịu hoàn toàn trách nhiệm về sự an toàn tính mạng, sức khỏe của bản thân trong quá trình làm việc.</p>
-        <p style="margin: 3px 0 3px 20px;">- Trường hợp xảy ra tai nạn, rủi ro do bản thân sơ suất, không cẩn thận, hoặc do vi phạm các quy tắc an toàn đã được cảnh báo ở trên, tôi xin tự gánh chịu toàn bộ chi phí điều trị, hồi phục và cam kết không khiếu nại, khiếu kiện, không đòi hỏi Chi nhánh Vận tải đường sắt Nha Trang phải bồi thường bất kỳ khoản tiền nào.</p>
+      <!-- NỘI DUNG ĐIỀU CHỈNH WYSIWYG CỦA ADMIN -->
+      <div class="safety-wysiwyg-content" style="font-size: 11pt; line-height: 1.6; margin-bottom: 20px;">
+        ${commitmentBodyHtml}
       </div>
 
       <p style="font-size: 11pt; font-style: italic; line-height: 1.5; margin-bottom: 24px;">
@@ -734,28 +758,60 @@ export function generateSafetyCommitmentHtml(contract: Contract, worker: WorkerC
   `;
 }
 
+export function getAcceptanceDepartmentName(report: AcceptanceReport, contract: Contract): string {
+  const station = (report.workStation || contract.stationLocation || '').toLowerCase().trim();
+  
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('vtds_users_database_v2') : null;
+    if (raw) {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list)) {
+        const found = list.find((a: { stationName?: string; department?: string; stationId?: string }) => {
+          const aStation = (a.stationName || '').toLowerCase();
+          const aDept = (a.department || '').toLowerCase();
+          const aId = (a.stationId || '').toLowerCase();
+          return (
+            (station && (aStation.includes(station) || station.includes(aStation) || station.includes(aId) || aDept.includes(station)))
+          );
+        });
+        if (found && found.stationName) {
+          return found.stationName.toUpperCase();
+        }
+      }
+    }
+  } catch {
+    // fallback
+  }
+
+  if (station.includes('diêu trì') || station.includes('dtr')) {
+    return 'TRẠM VTĐS DIÊU TRÌ';
+  }
+  if (station.includes('tuy hòa') || station.includes('tho')) {
+    return 'TRẠM VTĐS TUY HÒA';
+  }
+  if (station.includes('nha trang') || station.includes('ntr')) {
+    return 'TRẠM VTĐS NHA TRANG';
+  }
+  return `TRẠM VTĐS ${contract.stationLocation.toUpperCase().replace('GA ', '')}`;
+}
+
 export function generateAcceptanceHtml(report: AcceptanceReport, contract: Contract, worker: WorkerContractor): string {
   const isCargoDual = contract.templateType === 'CARGO_DUAL_EMPLOYER';
   const isCargoPrinciple = contract.templateType === 'CARGO_PRINCIPLE_VTHN';
   const isCargo = isCargoDual || isCargoPrinciple;
+  const deptName = getAcceptanceDepartmentName(report, contract);
 
   if (isCargoPrinciple) {
     // Exact layout from Page 5 of PDF
     return `
     <div class="doc-page" style="font-family: 'Times New Roman', 'Tinos', Times, Georgia, serif; font-size: 12pt; line-height: 1.5; color: #000; page-break-before: always;">
       <!-- ĐƠN VỊ VÀ BỘ PHẬN HÓA VẬN GA -->
-      <table style="width: 100%; border: none; margin-bottom: 12px;">
-        <tr>
-          <td style="width: 60%; vertical-align: top;">
-            <div style="font-size: 10.5pt; font-weight: bold; text-transform: uppercase;">ĐƠN VỊ: CHI NHÁNH VẬN TẢI ĐƯỜNG SẮT NHA TRANG</div>
-            <div style="font-size: 10.5pt; font-weight: bold; text-transform: uppercase;">BỘ PHẬN: HÓA VẬN ${contract.stationLocation.toUpperCase()}</div>
-            <div style="font-size: 9.5pt; font-style: italic;">Số BB: ${report.reportNumber}</div>
-          </td>
-          <td style="width: 40%; text-align: right; vertical-align: top; font-size: 10pt; font-style: italic;">
-            ${formatDateVi(report.acceptanceDate)}
-          </td>
-        </tr>
-      </table>
+      <div style="margin-bottom: 12px; line-height: 1.4;">
+        <div style="font-size: 9.5pt; font-weight: bold; text-transform: uppercase;">TẬP ĐOÀN ĐƯỜNG SẮT QUỐC GIA VIỆT NAM</div>
+        <div style="font-size: 10.5pt; font-weight: bold; text-transform: uppercase;">ĐƠN VỊ: CHI NHÁNH VẬN TẢI ĐƯỜNG SẮT NHA TRANG</div>
+        <div style="font-size: 10.5pt; font-weight: bold; text-transform: uppercase;">BỘ PHẬN: ${deptName}</div>
+        <div style="font-size: 9.5pt; font-style: italic; margin-top: 2px;">Số BB: ${report.reportNumber}</div>
+      </div>
 
       <!-- TIÊU ĐỀ BIÊN BẢN -->
       <div style="text-align: center; margin: 15px 0 15px 0;">
@@ -786,18 +842,18 @@ export function generateAcceptanceHtml(report: AcceptanceReport, contract: Contr
         Hai bên tiến hành kiểm tra, nghiệm thu khối lượng bốc dỡ thực tế như sau:
       </p>
 
-      <!-- BẢNG KHỐI LƯỢNG BỐC DỠ -->
+      <!-- BẢNG KHỐI LƯỢNG BỐC DỠ (CỘT RỘNG VỪA VẶN) -->
       <table style="width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 10pt;" border="1" cellpadding="6">
         <thead>
           <tr style="background-color: #f1f5f9; text-align: center; font-weight: bold;">
-            <th style="width: 35px; border: 1px solid #333;">TT</th>
-            <th style="width: 85px; border: 1px solid #333;">Ngày thực hiện</th>
-            <th style="width: 95px; border: 1px solid #333;">Số hiệu toa xe</th>
-            <th style="border: 1px solid #333;">Loại hàng hóa</th>
-            <th style="width: 70px; border: 1px solid #333;">Khối lượng (tấn)</th>
-            <th style="width: 95px; border: 1px solid #333;">Đơn giá (đồng/tấn)</th>
-            <th style="width: 110px; border: 1px solid #333;">Thành tiền (VNĐ)</th>
-            <th style="width: 80px; border: 1px solid #333;">Ghi chú</th>
+            <th style="width: 32px; border: 1px solid #333;">TT</th>
+            <th style="width: 78px; border: 1px solid #333;">Ngày thực hiện</th>
+            <th style="width: 85px; border: 1px solid #333;">Số hiệu toa xe</th>
+            <th style="min-width: 145px; width: 160px; border: 1px solid #333;">Loại hàng hóa</th>
+            <th style="width: 52px; border: 1px solid #333;">Khối lượng (tấn)</th>
+            <th style="width: 82px; border: 1px solid #333;">Đơn giá (đồng/tấn)</th>
+            <th style="width: 88px; border: 1px solid #333;">Thành tiền (VNĐ)</th>
+            <th style="width: 75px; border: 1px solid #333;">Ghi chú</th>
           </tr>
         </thead>
         <tbody>
@@ -806,7 +862,7 @@ export function generateAcceptanceHtml(report: AcceptanceReport, contract: Contr
               <td style="text-align: center; border: 1px solid #333;">${idx + 1}</td>
               <td style="text-align: center; border: 1px solid #333;">${formatDateShortVi(item.workDate)}</td>
               <td style="text-align: center; border: 1px solid #333; font-weight: bold;">${item.wagonOrBatchNumber}</td>
-              <td style="border: 1px solid #333;">${item.description}</td>
+              <td style="border: 1px solid #333; padding: 4px 6px;">${item.description}</td>
               <td style="text-align: center; border: 1px solid #333; font-weight: bold;">${item.quantity}</td>
               <td style="text-align: right; border: 1px solid #333;">${formatNumber(item.unitPrice)}</td>
               <td style="text-align: right; border: 1px solid #333; font-weight: bold;">${formatNumber(item.amount)}</td>
@@ -875,18 +931,12 @@ export function generateAcceptanceHtml(report: AcceptanceReport, contract: Contr
   return `
     <div class="doc-page" style="font-family: 'Times New Roman', 'Tinos', Times, Georgia, serif; font-size: 12pt; line-height: 1.5; color: #000; page-break-before: always;">
       <!-- ĐƠN VỊ VÀ TIÊU ĐỀ BỘ PHẬN -->
-      <table style="width: 100%; border: none; margin-bottom: 15px;">
-        <tr>
-          <td style="width: 50%; vertical-align: top;">
-            <div style="font-size: 10pt; font-weight: bold; text-transform: uppercase;">ĐƠN VỊ: CHI NHÁNH VẬN TẢI ĐƯỜNG SẮT NHA TRANG</div>
-            <div style="font-size: 10pt; font-weight: bold; text-transform: uppercase;">BỘ PHẬN: HÓA VẬN / TRỰC BAN ${report.workStation.toUpperCase()}</div>
-            <div style="font-size: 9pt; font-style: italic;">Số BB: ${report.reportNumber}</div>
-          </td>
-          <td style="width: 50%; text-align: right; vertical-align: top; font-size: 10pt; font-style: italic;">
-            ${formatDateVi(report.acceptanceDate)}
-          </td>
-        </tr>
-      </table>
+      <div style="margin-bottom: 14px; line-height: 1.4;">
+        <div style="font-size: 9.5pt; font-weight: bold; text-transform: uppercase;">TẬP ĐOÀN ĐƯỜNG SẮT QUỐC GIA VIỆT NAM</div>
+        <div style="font-size: 10.5pt; font-weight: bold; text-transform: uppercase;">ĐƠN VỊ: CHI NHÁNH VẬN TẢI ĐƯỜNG SẮT NHA TRANG</div>
+        <div style="font-size: 10.5pt; font-weight: bold; text-transform: uppercase;">BỘ PHẬN: ${deptName}</div>
+        <div style="font-size: 9.5pt; font-style: italic; margin-top: 2px;">Số BB: ${report.reportNumber}</div>
+      </div>
 
       <!-- TIÊU ĐỀ BIÊN BẢN -->
       <div style="text-align: center; margin: 15px 0 15px 0;">
@@ -921,13 +971,13 @@ export function generateAcceptanceHtml(report: AcceptanceReport, contract: Contr
       <table style="width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 10pt;" border="1" cellpadding="6">
         <thead>
           <tr style="background-color: #f1f5f9; text-align: center; font-weight: bold;">
-            <th style="width: 35px; border: 1px solid #333;">TT</th>
-            <th style="width: 80px; border: 1px solid #333;">Ngày thực hiện</th>
-            <th style="border: 1px solid #333;">Số hiệu toa xe / Nội dung</th>
-            <th style="width: 60px; border: 1px solid #333;">Khối lượng</th>
-            <th style="width: 95px; border: 1px solid #333;">Đơn giá (VNĐ)</th>
-            <th style="width: 110px; border: 1px solid #333;">Thành tiền (VNĐ)</th>
-            <th style="width: 90px; border: 1px solid #333;">Ghi chú</th>
+            <th style="width: 32px; border: 1px solid #333;">TT</th>
+            <th style="width: 78px; border: 1px solid #333;">Ngày thực hiện</th>
+            <th style="min-width: 155px; border: 1px solid #333;">Số hiệu toa xe / Nội dung</th>
+            <th style="width: 52px; border: 1px solid #333;">Khối lượng</th>
+            <th style="width: 82px; border: 1px solid #333;">Đơn giá (VNĐ)</th>
+            <th style="width: 88px; border: 1px solid #333;">Thành tiền (VNĐ)</th>
+            <th style="width: 75px; border: 1px solid #333;">Ghi chú</th>
           </tr>
         </thead>
         <tbody>
@@ -935,7 +985,7 @@ export function generateAcceptanceHtml(report: AcceptanceReport, contract: Contr
             <tr>
               <td style="text-align: center; border: 1px solid #333;">${idx + 1}</td>
               <td style="text-align: center; border: 1px solid #333;">${formatDateShortVi(item.workDate)}</td>
-              <td style="border: 1px solid #333;">
+              <td style="border: 1px solid #333; padding: 4px 6px;">
                 <strong>${item.wagonOrBatchNumber}</strong><br/>
                 <span style="font-size: 9pt; color: #444;">${item.description}</span>
               </td>
@@ -965,40 +1015,25 @@ export function generateAcceptanceHtml(report: AcceptanceReport, contract: Contr
             <td style="text-align: right; border: 1px solid #333; color: #15803d; font-size: 11pt;">${formatNumber(report.netAmount)}</td>
             <td style="border: 1px solid #333;"></td>
           </tr>
-          ` : `
-          <tr style="font-size: 9.5pt; color: #475569;">
-            <td colspan="5" style="text-align: right; border: 1px solid #333; padding-right: 10px;">
-              Thuế TNCN: Tạm chưa khấu trừ (${report.grossAmount < 5000000 ? 'Dưới ngưỡng 5.000.000đ' : 'Đã có Bản cam kết thu nhập 08/CK-TNCN'})
-            </td>
-            <td style="text-align: right; border: 1px solid #333; font-weight: bold;">0</td>
-            <td style="border: 1px solid #333; font-size: 8.5pt;">0%</td>
-          </tr>
-          <tr style="font-weight: bold; background-color: #f1f5f9; font-size: 10.5pt;">
-            <td colspan="5" style="text-align: right; border: 1px solid #333; padding-right: 10px; color: #15803d;">
-              SỐ TIỀN CHI TRẢ BÊN B (100%):
-            </td>
-            <td style="text-align: right; border: 1px solid #333; color: #15803d; font-size: 11pt;">${formatNumber(report.netAmount)}</td>
-            <td style="border: 1px solid #333;"></td>
-          </tr>
-          `}
+          ` : ''}
         </tbody>
       </table>
 
       <!-- TIỀN BẰNG CHỮ -->
       <div style="font-size: 10.5pt; margin-bottom: 12px; line-height: 1.5;">
-        (Số tiền thực lĩnh bằng chữ: <strong><em>${numberToVietnameseWords(report.netAmount)}</em></strong>).
+        (Bằng chữ: <strong><em>${numberToVietnameseWords(report.netAmount)}</em></strong>).
       </div>
 
       <!-- ĐÁNH GIÁ KẾT QUẢ -->
-      <div style="font-size: 10.5pt; line-height: 1.5; margin-bottom: 14px;">
+      <div style="font-size: 10.5pt; line-height: 1.6; margin-bottom: 16px;">
         <p style="font-weight: bold; margin: 3px 0;">ĐÁNH GIÁ KẾT QUẢ:</p>
-        <p style="margin: 2px 0 2px 10px;">- <strong>Khối lượng:</strong> Hoàn thành ${report.evaluationCompletedWagons} ${isCargo ? 'tấn hàng' : 'toa xe'} theo đúng kế hoạch tác nghiệp của Chi nhánh.</p>
-        <p style="margin: 2px 0 2px 10px;">- <strong>Chất lượng:</strong> ${report.evaluationNotes}</p>
-        <p style="margin: 2px 0 2px 10px;">- Hai bên thống nhất làm thủ tục thanh toán số tiền thực lĩnh trên cho Bên nhận khoán (Hình thức: ${report.paymentMethod === 'bank_transfer' ? 'Chuyển khoản qua số tài khoản ' + worker.bankAccount + ' tại ' + worker.bankName : 'Tiền mặt'}).</p>
+        <p style="margin: 2px 0 2px 10px;">- <strong>Khối lượng thực hiện:</strong> ${report.evaluationCompletedWagons} ${isCargo ? 'tấn hàng bốc dỡ' : 'toa xe xịt rửa, vệ sinh'} hoàn thành đúng kế hoạch chạy tàu.</p>
+        <p style="margin: 2px 0 2px 10px;">- <strong>Chất lượng:</strong> Đạt tiêu chuẩn vệ sinh tác nghiệp kỹ thuật / bảo quản hàng hóa nguyên vẹn.</p>
+        <p style="margin: 2px 0 2px 10px;">- Hai bên thống nhất nghiệm thu và làm thủ tục thanh toán cho Bên nhận khoán.</p>
       </div>
 
       <!-- CHỮ KÝ -->
-      <table style="width: 100%; border: none; margin-top: 25px;">
+      <table style="width: 100%; border: none; margin-top: 30px;">
         <tr>
           <td style="width: 50%; text-align: center; vertical-align: top;">
             <div style="font-size: 10.5pt; font-weight: bold; text-transform: uppercase;">ĐẠI DIỆN BÊN NHẬN KHOÁN</div>

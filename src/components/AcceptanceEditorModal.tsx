@@ -48,6 +48,7 @@ export const AcceptanceEditorModal: React.FC<AcceptanceEditorModalProps> = ({
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [paymentReference, setPaymentReference] = useState<string>('');
   const [evaluationNotes, setEvaluationNotes] = useState<string>('Toa xe được làm sạch bùn đất, rác thải thu gom sạch sẽ, kính cửa sổ sáng rõ bảo đảm an toàn kỹ thuật trước giờ chạy tàu.');
+  const [formError, setFormError] = useState<string | null>(null);
 
   const workerMap = new Map(workers.map(w => [w.id, w]));
   const contractMap = new Map(contracts.map(c => [c.id, c]));
@@ -206,12 +207,13 @@ export const AcceptanceEditorModal: React.FC<AcceptanceEditorModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!contractId || !selectedContract) {
-      alert('Vui lòng chọn Hợp đồng tương ứng');
+      setFormError('Vui lòng chọn Hợp đồng tương ứng');
       return;
     }
     if (items.length === 0) {
-      alert('Vui lòng nhập ít nhất một dòng nghiệm thu khối lượng');
+      setFormError('Vui lòng nhập ít nhất một dòng nghiệm thu khối lượng');
       return;
     }
 
@@ -552,6 +554,12 @@ export const AcceptanceEditorModal: React.FC<AcceptanceEditorModalProps> = ({
               className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:ring-1 focus:ring-slate-900"
             />
           </div>
+
+          {formError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg">
+              {formError}
+            </div>
+          )}
 
           {/* Action buttons */}
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">

@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+/* Official Railway Standard Print Rules (Nghị định 30/2020/NĐ-CP) */
+@page {
+  size: A4 portrait;
+  margin: 15mm 15mm 15mm 20mm;
+}
+
+@media print {
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-family: "Times New Roman", Times, Georgia, serif !important;
+  }
+
+  /* Hide navigation, sidebar, toolbars and non-printable UI */
+  header,
+  nav,
+  .print\:hidden,
+  button,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Ensure printable area takes full width cleanly */
+  .print-document-container {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .doc-page {
+    page-break-after: always !important;
+    break-after: page !important;
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .doc-page:last-child {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+}

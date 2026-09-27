@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
 import { Contract, WorkerContractor, AcceptanceReport } from '../types';
 
 export interface LegalRiskAudit {
@@ -171,33 +170,24 @@ export function auditContractCompliance(
 }
 
 export async function askGeminiLegalAdvisor(prompt: string, context?: string): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY || (window as unknown as { GEMINI_API_KEY?: string }).GEMINI_API_KEY;
-
-  if (!apiKey) {
-    return getOfflineLegalAnswer(prompt);
-  }
-
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const systemInstruction = `
-      Bạn là Chuyên gia Cao cấp về Pháp luật Lao động, Bộ luật Dân sự 2015, Luật Bảo hiểm xã hội 2024 và Luật Thuế TNCN (Nghị định 253/2026/NĐ-CP) của Việt Nam, chuyên tư vấn cho Chi nhánh Vận tải đường sắt Nha Trang.
-      Nhiệm vụ: Giải đáp câu hỏi, hướng dẫn soạn thảo điều khoản hợp đồng giao khoán công việc theo sản phẩm (vệ sinh rửa toa xe, bốc xếp hàng hóa tại ga), xử lý rủi ro pháp lý để không bị cơ quan chức năng coi là hợp đồng lao động ngụy trang, hướng dẫn khấu trừ thuế 10% đúng quy định.
-      Trả lời bằng tiếng Việt chuyên nghiệp, trích dẫn chính xác điều khoản luật, ngắn gọn, có gạch đầu dòng rõ ràng và đưa ra phương án xử lý thực tiễn.
-    `;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: `${systemInstruction}\n\nThông tin bối cảnh:\n${context || 'Chi nhánh Vận tải đường sắt Nha Trang'}\n\nCâu hỏi:\n${prompt}` }]
-        }
-      ]
+    const res = await fetch('/api/legal-advisor', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ prompt, context }),
     });
 
-    return response.text || getOfflineLegalAnswer(prompt);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && typeof data.text === 'string' && data.text.trim()) {
+        return data.text;
+      }
+    }
+    return getOfflineLegalAnswer(prompt);
   } catch (error) {
-    console.error('Gemini API call failed, falling back to local legal knowledge base:', error);
+    console.warn('Gemini proxy API failed, falling back to local legal knowledge base:', error);
     return getOfflineLegalAnswer(prompt);
   }
 }

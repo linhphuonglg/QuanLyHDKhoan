@@ -43,9 +43,41 @@ export interface PartyAInfo {
 
 export type UserRole = 
   | 'admin'             // Admin - Chi nhánh Vận tải đường sắt Nha Trang (Toàn quyền quản trị & chỉnh sửa nội dung HĐ)
-  | 'station_nhatrang'  // Trạm VTĐS Nha Trang (Chỉ xem nội dung HĐ; quản lý nghiệm thu Ga Nha Trang)
-  | 'station_tuyhoa'    // Trạm VTĐS Tuy Hòa (Chỉ xem nội dung HĐ; quản lý nghiệm thu Ga Tuy Hòa)
-  | 'station_dieutri';  // Trạm VTĐS Diêu Trì (Chỉ xem nội dung HĐ; quản lý nghiệm thu Ga Diêu Trì)
+  | 'station_nhatrang'  // Trạm VTĐS Nha Trang (userntr)
+  | 'station_tuyhoa'    // Trạm VTĐS Tuy Hòa (usertho)
+  | 'station_dieutri';  // Trạm VTĐS Diêu Trì (userdtr)
+
+export interface AppAccount {
+  username: string; // 'admin' | 'userdtr' | 'usertho' | 'userntr' | custom
+  password?: string;
+  fullName: string;
+  email?: string;
+  phone?: string;
+  role: UserRole;
+  stationId: 'all' | 'dieutri' | 'tuyhoa' | 'nhatrang' | string;
+  stationName: string;
+  department: string;
+  badgeColor: string;
+  badgeText: string;
+  description: string;
+  status?: 'active' | 'locked';
+  createdAt?: string;
+  
+  // Granular Permissions Matrix
+  canEditContractContent: boolean; // Chỉ Admin: Chỉnh sửa điều khoản pháp lý khung Điều 1 - 5
+  canCreateContract?: boolean;      // Lập hợp đồng mới
+  canEditContractDetails?: boolean;  // Sửa đơn giá, thời hạn, bên B
+  canDeleteContract?: boolean;      // Xóa hợp đồng
+  canCreateWorker?: boolean;        // Tạo hồ sơ người nhận khoán
+  canEditWorker?: boolean;          // Sửa thông tin & ngân sách người lao động
+  canDeleteWorker?: boolean;        // Xóa hồ sơ lao động
+  canCreateAcceptance?: boolean;    // Lập biên bản nghiệm thu
+  canEditAcceptance?: boolean;      // Sửa biên bản nghiệm thu
+  canDeleteAcceptance?: boolean;    // Xóa biên bản nghiệm thu
+  canApprovePayment: boolean;      // Duyệt chi thanh toán / quyết toán
+  canDeleteMasterData: boolean;    // Xóa dữ liệu gốc
+  canManageAllStations: boolean;   // Quản trị toàn bộ trạm & Người dùng
+}
 
 export interface UserRoleProfile {
   id: UserRole;
@@ -68,15 +100,34 @@ export interface UserRoleProfile {
   description: string;
 }
 
+export interface DocumentFormattingOptions {
+  fontSize?: number;        // pt: 12, 13, 14
+  lineHeight?: number;      // 1.2, 1.35, 1.5
+  paragraphIndent?: number; // cm: 0, 1.0, 1.27
+  textAlign?: 'justify' | 'left';
+  marginLeft?: number;      // cm: 3.0
+  marginRight?: number;     // cm: 2.0
+  marginTop?: number;       // cm: 2.0
+  marginBottom?: number;    // cm: 2.0
+  showPage1Header?: boolean; // default false (loại bỏ phần tô đỏ thừa ở trang 1)
+  showPageNumbers?: boolean; // default true
+}
+
 export interface CustomContractContent {
   customTitle?: string;
   customLegalBasis?: string;
+  customFullContract?: string; // Toàn bộ nội dung hợp đồng từ Điều 1 đến hết (trong một khung WYSIWYG duy nhất)
   customArticle1?: string; // Điều 1: Phạm vi và nguyên tắc thực hiện công việc
   customArticle2?: string; // Điều 2: Đơn giá khoán và phương thức thanh toán
   customArticle3?: string; // Điều 3: BHXH và Thuế TNCN (NĐ 253/2026/NĐ-CP)
   customArticle4?: string; // Điều 4: An toàn lao động và bồi thường thiệt hại
   customArticle5?: string; // Điều 5: Điều khoản thi hành & Hiệu lực
   customNotes?: string;    // Điều khoản bổ sung riêng
+  
+  // Custom Safety Commitment Content (Bản cam kết an toàn lao động - WYSIWYG)
+  customSafetyCommitment?: string;
+  
+  formatting?: DocumentFormattingOptions;
   lastEditedBy?: string;
   lastEditedAt?: string;
 }
